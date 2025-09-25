@@ -1,13 +1,25 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import edu.wpi.first.toolchain.*
 
 plugins {
+    id 'cpp'
     id 'java'
-    id 'edu.wpi.first.wpilib.repositories.WPILibRepositoriesPlugin'
+    id 'google-test'
+    id 'edu.wpi.first.wpilib.repositories.WPILibRepositoriesPlugin' version '2025.0'
+    id 'edu.wpi.first.NativeUtils' version '2025.9.0'
+    id 'edu.wpi.first.GradleJni' version '1.1.0'
+    id 'edu.wpi.first.GradleVsCode' version '2.1.0'
     id "org.jetbrains.kotlin.jvm"
     id 'maven-publish'
     id "io.deepmedia.tools.deployer"
 }
 
+apply plugin: 'google-test'
+
+// c++ config
+apply from: 'config.gradle'
+
+// java config
 dependencies {
     api project(':units')
 
@@ -27,6 +39,15 @@ dependencies {
 
     testImplementation 'org.junit.jupiter:junit-jupiter:5.10.1'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+test {
+    useJUnitPlatform()
+    systemProperty 'junit.jupiter.extensions.autodetection.enabled', 'true'
+    testLogging {
+        events "failed"
+        exceptionFormat "full"
+    }
 }
 
 var javaVersion = "17"
@@ -96,11 +117,54 @@ javadoc {
     }
 }
 
-test {
-    useJUnitPlatform()
-    systemProperty 'junit.jupiter.extensions.autodetection.enabled', 'true'
-    testLogging {
-        events "failed"
-        exceptionFormat "full"
+// Set up exports properly
+nativeUtils {
+    exportsConfigs {
+        // Main library is just default empty. This will export everything
+        Vendor {
+        }
+    }
+}
+
+ext.getCurrentArch = {
+    return NativePlatforms.desktop
+}
+
+def systemArch = getCurrentArch()
+
+model {
+    components {
+        VendorDriver(JniNativeLibrarySpec) {
+            enableCheckTask true
+            javaCompileTasks << compileJava
+            jniCrossCompileOptions << JniCrossCompileOptions(nativeUtils.wpi.platforms.roborio)
+            // Leave these for future proofing
+            jniCrossCompileOptions << JniCrossCompileOptions(nativeUtils.wpi.platforms.linuxarm32)
+            jniCrossCompileOptions << JniCrossCompileOptions(nativeUtils.wpi.platforms.linuxarm64)
+            sources {
+                cpp {
+                    source {
+                        srcDirs 'src/main/driver/cpp'
+                        include '**/*.cpp'
+                    }
+                    exportedHeaders {
+                        srcDirs 'src/main/driver/include'
+                    }
+                }
+            }
+
+            nativeUtils.useRequiredLibrary(it, "driver_shared")
+        }
+    }
+    testSuites {
+        VendorDriverTest {
+            sources.cpp {
+                source {
+                    srcDir 'src/test/driver/cpp'
+                    include '**/*.cpp'
+                }
+            }
+            nativeUtils.useRequiredLibrary(it, "wpilib_executable_shared", "googletest_static")
+        }
     }
 }
